@@ -1,6 +1,6 @@
-# CI/CD Pipeline for Snowflake-native dbt
-# Deploys and executes dbt inside Snowflake via snow dbt
-# Triggers on push to main and pull requests
+# CI/CD Pipeline for dbt Core (Local Execution)
+# dbt runs on the GitHub Actions runner, sends SQL to Snowflake
+# Triggers on push to main, develop, and pull requests
 
 name: dbt CI/CD Pipeline
 
@@ -12,7 +12,6 @@ on:
     branches: [main]
 
 env:
-  DBT_PROJECT_NAME: openflow_analytics
   SNOWFLAKE_DATABASE: POSTGRES_REPLICA
   SNOWFLAKE_SCHEMA: DBT_PROJECTS
 
@@ -42,10 +41,10 @@ jobs:
         continue-on-error: true
 
   # ============================================
-  # JOB 2: dbt Compile & Deploy to CI
+  # JOB 2: dbt Build & Test (CI schema)
   # ============================================
-  compile:
-    name: dbt Compile
+  build:
+    name: dbt Build & Test
     runs-on: ubuntu-latest
     needs: lint
     
@@ -58,23 +57,8 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Snowflake CLI
-        run: pip install snowflake-cli
-
-      - name: Configure Snowflake connection
-        run: |
-          mkdir -p ~/.snowflake
-          cat << EOF > ~/.snowflake/connections.toml
-          [default]
-          account = "${{ secrets.SNOWFLAKE_ACCOUNT }}"
-          user = "${{ secrets.SNOWFLAKE_USER }}"
-          password = "${{ secrets.SNOWFLAKE_PASSWORD }}"
-          role = "${{ secrets.SNOWFLAKE_ROLE }}"
-          warehouse = "${{ secrets.SNOWFLAKE_WAREHOUSE }}"
-          database = "${{ env.SNOWFLAKE_DATABASE }}"
-          schema = "${{ env.SNOWFLAKE_SCHEMA }}"
-          EOF
-          chmod 0600 ~/.snowflake/connections.toml
+      - name: Install dbt
+        run: pip install dbt-core dbt-snowflake
 
       - name: Create profiles.yml for CI
         run: |
@@ -94,30 +78,14 @@ jobs:
                 threads: 4
           EOF
 
-      - name: Deploy dbt project
-        run: |
-          snow dbt deploy ${{ env.DBT_PROJECT_NAME }} \
-            --source . \
-            --database ${{ env.SNOWFLAKE_DATABASE }} \
-            --schema ${{ env.SNOWFLAKE_SCHEMA }}_CI \
-            --connection default \
-            --force
+      - name: Verify dbt connection
+        run: dbt debug --profiles-dir .
 
       - name: Run dbt models
-        run: |
-          snow dbt execute \
-            --connection default \
-            --database ${{ env.SNOWFLAKE_DATABASE }} \
-            --schema ${{ env.SNOWFLAKE_SCHEMA }}_CI \
-            ${{ env.DBT_PROJECT_NAME }} run
+        run: dbt run --profiles-dir .
 
       - name: Run dbt tests
-        run: |
-          snow dbt execute \
-            --connection default \
-            --database ${{ env.SNOWFLAKE_DATABASE }} \
-            --schema ${{ env.SNOWFLAKE_SCHEMA }}_CI \
-            ${{ env.DBT_PROJECT_NAME }} test
+        run: dbt test --profiles-dir .
 
   # ============================================
   # JOB 3: Deploy to Production (on push to main)
@@ -125,7 +93,7 @@ jobs:
   deploy-prod:
     name: Deploy to Production
     runs-on: ubuntu-latest
-    needs: compile
+    needs: build
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment: production
     
@@ -138,25 +106,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Snowflake CLI
-        run: pip install snowflake-cli
+      - name: Install dbt
+        run: pip install dbt-core dbt-snowflake
 
-      - name: Configure Snowflake connection
-        run: |
-          mkdir -p ~/.snowflake
-          cat << EOF > ~/.snowflake/connections.toml
-          [default]
-          account = "${{ secrets.SNOWFLAKE_ACCOUNT }}"
-          user = "${{ secrets.SNOWFLAKE_USER }}"
-          password = "${{ secrets.SNOWFLAKE_PASSWORD }}"
-          role = "${{ secrets.SNOWFLAKE_ROLE }}"
-          warehouse = "${{ secrets.SNOWFLAKE_WAREHOUSE }}"
-          database = "${{ env.SNOWFLAKE_DATABASE }}"
-          schema = "${{ env.SNOWFLAKE_SCHEMA }}_PROD"
-          EOF
-          chmod 0600 ~/.snowflake/connections.toml
-
-      - name: Create profiles.yml
+      - name: Create profiles.yml for Production
         run: |
           cat << EOF > profiles.yml
           snowflake:
@@ -174,27 +127,8 @@ jobs:
                 threads: 4
           EOF
 
-      - name: Deploy to Production
-        run: |
-          snow dbt deploy ${{ env.DBT_PROJECT_NAME }} \
-            --source . \
-            --database ${{ env.SNOWFLAKE_DATABASE }} \
-            --schema ${{ env.SNOWFLAKE_SCHEMA }}_PROD \
-            --connection default \
-            --force
-
       - name: Run dbt models in Production
-        run: |
-          snow dbt execute \
-            --connection default \
-            --database ${{ env.SNOWFLAKE_DATABASE }} \
-            --schema ${{ env.SNOWFLAKE_SCHEMA }}_PROD \
-            ${{ env.DBT_PROJECT_NAME }} run
+        run: dbt run --profiles-dir .
 
       - name: Run dbt tests in Production
-        run: |
-          snow dbt execute \
-            --connection default \
-            --database ${{ env.SNOWFLAKE_DATABASE }} \
-            --schema ${{ env.SNOWFLAKE_SCHEMA }}_PROD \
-            ${{ env.DBT_PROJECT_NAME }} test
+        run: dbt test --profiles-dir .

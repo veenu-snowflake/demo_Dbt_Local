@@ -8,6 +8,9 @@ logs/
 .env
 .env.local
 
+# Credentials - NEVER commit these
+profiles.yml
+
 # Python
 __pycache__/
 *.py[cod]

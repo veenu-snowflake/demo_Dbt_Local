@@ -1,24 +1,25 @@
-# OpenFlow Analytics - Snowflake-Native dbt Project
+# OpenFlow Analytics - dbt Core (Local)
 
-A dbt project for transforming data loaded by OpenFlow into Snowflake. This project runs **entirely inside Snowflake** using Snowflake-native dbt (`snow dbt`). No external CI/CD runners, no credential management, no network connectivity issues.
+A dbt project for transforming data loaded by OpenFlow into Snowflake. This project uses **dbt Core** -- the open-source dbt engine runs locally on your machine (or a CI/CD runner) and sends SQL to Snowflake for execution.
 
-## Why Snowflake-Native dbt?
+## How This Differs from demo_Dbt (Snowflake-Native)
 
-| Aspect | dbt Core (External) | Snowflake-Native dbt |
-|--------|---------------------|----------------------|
-| **Where it runs** | Your laptop or CI/CD runner | Inside Snowflake |
-| **Authentication** | Credentials via env vars or secrets | Snowflake session (automatic) |
-| **Network access** | Runner must reach Snowflake | Already inside Snowflake |
-| **CI/CD pipeline** | GitHub Actions + secrets setup | Not needed |
-| **Scheduling** | External scheduler (cron, Airflow) | Snowflake Tasks |
-| **Cost** | Runner compute + Snowflake warehouse | Snowflake warehouse only |
+| Aspect | This Project (dbt Core) | demo_Dbt (Snowflake-Native) |
+|--------|------------------------|----------------------------|
+| **dbt engine runs on** | Your laptop / CI runner | Inside Snowflake |
+| **Command to run** | `dbt run` | `snow dbt execute ... run` |
+| **Visible in Snowflake UI** | No | Yes (under dbt Projects) |
+| **Authentication** | Credentials via env vars | Snowflake session (automatic) |
+| **Network access** | Machine must reach Snowflake | Already inside Snowflake |
+| **CI/CD** | GitHub Actions + `dbt run` | GitHub Actions + `snow dbt` |
+| **Scheduling** | External (cron, Airflow) | Snowflake Tasks |
 
 ## Project Structure
 
 ```
-demo_Dbt_Snowflake/
+demo_Dbt_Local/
 ├── dbt_project.yml              # Project configuration
-├── profiles.yml                 # Snowflake session auth (placeholders)
+├── profiles.yml.template        # Connection template (copy to profiles.yml)
 │
 ├── models/
 │   ├── sources.yml              # Source definitions
@@ -50,58 +51,70 @@ PostgreSQL ──► raw_postgres__customer_loyalty ─────────�
 SharePoint ──► raw_sharepoint__documents ──► int_sharepoint__documents ──► rpt_document_summary
 ```
 
-## Deployment & Execution
+## Setup
 
-### Step 1: Deploy the project into Snowflake
+1. Install dbt:
+   ```bash
+   pip install dbt-core dbt-snowflake
+   ```
 
-```bash
-snow dbt deploy openflow_analytics \
-  --source . \
-  --database POSTGRES_REPLICA \
-  --schema DBT_PROJECTS \
-  --connection <your-connection> \
-  --force
-```
+2. Copy the template profile:
+   ```bash
+   cp profiles.yml.template profiles.yml
+   ```
 
-This uploads the entire dbt project into Snowflake. No external files or dependencies remain outside.
+3. Set environment variables:
+   ```bash
+   export SNOWFLAKE_ACCOUNT="SFSEAPAC-VYADAV_AWS_AU"
+   export SNOWFLAKE_USER="your-user"
+   export SNOWFLAKE_PASSWORD="your-password"
+   ```
 
-### Step 2: Run all models
+4. Verify connection:
+   ```bash
+   dbt debug --profiles-dir .
+   ```
 
-```bash
-snow dbt execute \
-  --connection <your-connection> \
-  --database POSTGRES_REPLICA \
-  --schema DBT_PROJECTS \
-  openflow_analytics run
-```
+5. Run models:
+   ```bash
+   dbt run --profiles-dir .
+   ```
 
-### Step 3: Run all tests
+6. Run tests:
+   ```bash
+   dbt test --profiles-dir .
+   ```
 
-```bash
-snow dbt execute \
-  --connection <your-connection> \
-  --database POSTGRES_REPLICA \
-  --schema DBT_PROJECTS \
-  openflow_analytics test
-```
+7. Run everything (models + tests):
+   ```bash
+   dbt build --profiles-dir .
+   ```
 
-### Step 4 (Optional): Schedule with Snowflake Tasks
+## CI/CD
 
-Once deployed, you can schedule recurring runs using Snowflake Tasks:
+This project uses GitHub Actions for CI/CD. The pipeline runs dbt Core on the runner.
 
-```sql
-CREATE OR REPLACE TASK dbt_openflow_analytics_task
-  WAREHOUSE = 'SNOWFLAKE_LEARNING_WH'
-  SCHEDULE = 'USING CRON 0 6 * * * America/Los_Angeles'  -- Daily at 6 AM
-AS
-  EXECUTE DBT PROJECT openflow_analytics
-    ARGS = 'run'
-    DATABASE = 'POSTGRES_REPLICA'
-    SCHEMA = 'DBT_PROJECTS';
+| Trigger | Action |
+|---------|--------|
+| Push to `develop` | Lint + Build & Test (CI schema) |
+| PR to `main` | Lint + Build & Test (CI schema) |
+| Push to `main` | Lint + Build & Test + Deploy to Production (with approval) |
 
--- Enable the task
-ALTER TASK dbt_openflow_analytics_task RESUME;
-```
+### Required GitHub Secrets
+
+| Secret | Description |
+|--------|-------------|
+| `SNOWFLAKE_ACCOUNT` | Snowflake account identifier (e.g., `SFSEAPAC-VYADAV_AWS_AU`) |
+| `SNOWFLAKE_USER` | Snowflake username |
+| `SNOWFLAKE_PASSWORD` | Snowflake password |
+| `SNOWFLAKE_ROLE` | Snowflake role (e.g., `ACCOUNTADMIN`) |
+| `SNOWFLAKE_WAREHOUSE` | Snowflake warehouse name |
+
+### Network Policy Note
+
+The CI/CD runner must be able to reach your Snowflake account. If your account has a network policy restricting IP access, you'll need to either:
+- Whitelist the runner's IP (not practical for GitHub-hosted runners)
+- Use a self-hosted runner on an allowed network
 
 ## Tests
 
@@ -109,23 +122,6 @@ ALTER TASK dbt_openflow_analytics_task RESUME;
 |------|-------|----------|
 | Generic Tests | 15 | `models/generic_tests.yml` |
 | Singular Tests | 4 | `tests/*.sql` |
-
-Run all tests:
-```bash
-snow dbt execute \
-  --connection <your-connection> \
-  --database POSTGRES_REPLICA \
-  --schema DBT_PROJECTS \
-  openflow_analytics test
-```
-
-## Key Differences from demo_Dbt (dbt Core version)
-
-- **No `.github/workflows/`** -- no CI/CD pipeline needed
-- **No `profiles.yml.template`** -- no external credentials to manage
-- **No GitHub Secrets** -- Snowflake session handles authentication
-- **Scheduling** -- use Snowflake Tasks instead of GitHub Actions triggers
-- **Same models, tests, and sources** -- the dbt logic is identical
 
 ## Version
 
