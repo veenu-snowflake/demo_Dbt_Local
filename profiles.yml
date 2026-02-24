@@ -1,0 +1,40 @@
+# This profiles.yml is for Snowflake-native dbt execution
+# Credentials are handled by Snowflake session, not environment variables
+
+snowflake:
+  target: dev
+
+  outputs:
+    dev:
+      type: snowflake
+      # These are placeholders - actual auth uses Snowflake session
+      account: placeholder
+      user: placeholder
+      password: placeholder
+      role: ACCOUNTADMIN
+      database: POSTGRES_REPLICA
+      warehouse: SNOWFLAKE_LEARNING_WH
+      schema: DBT_PROJECTS
+      threads: 4
+    qa:
+      type: snowflake
+      # These are placeholders - actual auth uses Snowflake session
+      account: placeholder
+      user: placeholder
+      password: placeholder
+      role: ACCOUNTADMIN
+      database: POSTGRES_REPLICA
+      warehouse: SNOWFLAKE_LEARNING_WH
+      schema: DBT_PROJECTS_QA
+      threads: 4
+    prod:
+      type: snowflake
+      # These are placeholders - actual auth uses Snowflake session
+      account: placeholder
+      user: placeholder
+      password: placeholder
+      role: ACCOUNTADMIN
+      database: POSTGRES_REPLICA
+      warehouse: SNOWFLAKE_LEARNING_WH
+      schema: DBT_PROJECTS_PROD
+      threads: 4
